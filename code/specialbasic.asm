@@ -45,6 +45,7 @@ CBM_FRESPC      = $35                   ; utility pointer for strings
 CBM_MEMSIZ      = $37                   ; highest BASIC RAM address / bottom of string stack
 CBM_TXTPTR      = $7A
 
+CBM_COMMANDBUF	= $0200
 CBM_KBDSCNVEC	= $028F
 
 ; ----------------------------------------------
@@ -612,7 +613,9 @@ L827C   PLA
         JMP CBM_IRQ
 
 ---------------------------------
-L828B   !by $00,$07,$0E                         ; ...
+; used in sound commands
+VOICES  !by $00,$07,$0E                         ; $D4xx
+
 L828E   !by $43,$44,$45,$46,$47,$41,$48         ; "CDEFGAH"
 L8295   !by $12,$23,$34,$46,$5A,$5A,$6E,$84     ; .#4FZZ..
         !by $9B,$B3,$CD,$E9                     ; ....
@@ -822,7 +825,7 @@ L847A   JSR CBM_INLIN                   ; call for BASIC input
         ADC $FA                         ; add AUTO step high byte +carry
         STA $F8                         ; store as new AUTO line high byte
         LDX CBM_TXTPTR                  ; load text pointer
-        LDA $0200,X                     ; load next char
+        LDA CBM_COMMANDBUF,X                     ; load next char
         BNE L84B0                       ; branch if not zero
         STA $CA0D                       ; else switch off AUTO mode
 L84B0   JMP $A49F                       ; go to ROM to finish the input
@@ -843,84 +846,105 @@ L84B8   LDA #$97
 ; - $84C8 Own crunch vector --------------------
 ; ----------------------------------------------
 OWN_CRUNCH
-        LDX CBM_TXTPTR
-L84CA   LDY CBM_TXTPTR+1
-L84CC   LDA #$00
-L84CE   STA CBM_TXTPTR
-L84D0   LDA #$02
-L84D2   STA CBM_TXTPTR+1
-L84D4   JSR CBM_CHRGOT
-L84D7   BCS L84DC
-L84D9   STA $CA1A                       ; RESUME flag
-L84DC   STX CBM_TXTPTR
-L84DE   STY CBM_TXTPTR+1
-L84E0   JSR ROM_OFF
-L84E3   LDX #$FF
-L84E5   INX
-L84E6   LDA $0200,X 
-L84E9   BEQ L855D
-L84EB   CMP #$22
-L84ED   BNE L84FB
-L84EF   INX
-L84F0   LDA $0200,X 
-L84F3   BEQ L855D
-L84F5   CMP #$22
-L84F7   BNE L84EF
-L84F9   BEQ L84E5
-L84FB   CMP #$41
-L84FD   BCC L84E5
-L84FF   CMP #$60
-L8501   BCS L84E5
-L8503   STX $22
-L8505   LDY #<CMDS-1                    ;#$01
-L8507   STY $FB
-L8509   STY $23
-L850B   DEY
-L850C   LDA #>CMDS                      ;#$A0
-L850E   STA $FC
-L8510   DEX
-L8511   INX
-L8512   INC $FB
-L8514   BNE L8518
-L8516   INC $FC
-L8518   LDA $0200,X 
-L851B   SEC
-L851C   SBC ($FB),Y
-L851E   BEQ L8511
-L8520   CMP #$80
-L8522   BEQ L8538
-L8524   LDX $22
-L8526   INC $23
-L8528   LDA ($FB),Y
-L852A   PHA
-L852B   INC $FB
-L852D   BNE L8531
-L852F   INC $FC
-L8531   PLA
-L8532   BEQ L84E5
-L8534   BPL L8528
-L8536   BMI L8518
-L8538   STX $24
-L853A   LDY $22
-L853C   LDX #$63
-L853E   LDA $23
-L8540   BPL L8545
-L8542   INX
-L8543   SBC #$7F
-L8545   STA $0201,Y 
-L8548   TXA
-L8549   STA $0200,Y 
-L854C   LDX $24
-L854E   INY
-L854F   INX
-L8550   LDA $0200,X 
-L8553   STA $0201,Y 
-L8556   BNE L854E
-L8558   LDX $22
-L855A   INX
-L855B   BNE L84E5
-L855D   JSR ROM_ON
-L8560   JMP $A57C
+        LDX CBM_TXTPTR                  ; save TXTPTR
+        LDY CBM_TXTPTR+1                ;
+        LDA #<CBM_COMMANDBUF            ; set TXTPTR temporarily 
+        STA CBM_TXTPTR                  ; to $0200
+        LDA #>CBM_COMMANDBUF            ; $02
+        STA CBM_TXTPTR+1                ; System/Basic input buffer
+        JSR CBM_CHRGOT                  ; get first char from line input
+        BCS +                           ; branch if it was a number
+        STA $CA1A                       ; else store #$02 to RESUME flag
++       STX CBM_TXTPTR                  ; restore TXTPTR
+        STY CBM_TXTPTR+1                ;
+
+L84E0   JSR ROM_OFF                     ;
+        LDX #$FF                        ; index pointer
+--      INX                             ; increment read index
+        LDA CBM_COMMANDBUF,X            ; get a byte from input buffer
+        BEQ +++                         ; go back to ROM
+
+; if found a quote, then skipp until next quote, or basic line end
+        CMP #$22                        ; compare with quote character
+        BNE +                           ; not a quote
+-       INX                             ; else increment read index
+        LDA CBM_COMMANDBUF,X            ; get a byte from input buffer
+        BEQ +++                         ; no more input, go back to ROM
+        CMP #$22                        ; else compare with second quote
+        BNE -                           ; not found, search until end of input
+        BEQ --                          ; (jmp) qutes are skipped, go get next char
+
++       CMP #$41                        ; check for possible command chars ???
+        BCC --                          ; below #$41, go back to ROM
+        CMP #$60                        ;
+        BCS --                          ; above #$5F, go back to ROM
+        STX $22                         ; store act. read index (where we have found a possible command)
+
+; A problem occurs in the next part when the CMDS table starts at an address like $A000
+; in this case, the Y register is loaded with #$FF and stored in $FB
+; the accu is loaded with #$A0 and stored in $FC
+; later, $FC is increased to #$00
+; then the BNE command to skip increasing $FC will not work
+; therefore, $FC is increased to #$A1 and ($FB) now contains the address $A100
+; Result:
+; The command tab must start at $X001 or higher.
+; however, the number of commands must also be taken into account so that the "page" is not left too early
+
+        LDY #<CMDS-1                    ; #$01
+        STY $FB
+        STY $23                         ; command counter
+        DEY
+        LDA #>CMDS                      ; #$A0
+        STA $FC
+        DEX                             ; input buffer index pointer
+-       INX
+        INC $FB 
+        BNE L8518
+        INC $FC 
+; compare command buffer char with command table
+L8518   LDA CBM_COMMANDBUF,X 
+        SEC
+        SBC ($FB),Y
+        BEQ -                           ; branch if equal 
+        CMP #$80                        ; else compare with shifted char (last command char)
+        BEQ ++                          ; branch if we found a command
+; if a command was not found
+        LDX $22                         ; input buffer index pointer (command start)
+        INC $23                         ; command counter
+
+-       LDA ($FB),Y                     ; load char from CMDS table
+        PHA                             ; save it
+        INC $FB                         ;
+        BNE +                           ;
+        INC $FC                         ;
++       PLA                             ; get back saved char
+        BEQ --                          ; if it was zero, loop check next char from input buffer
+        BPL -                           ; branch if it was not the last char of a command
+        BMI L8518                       ; it was the last char, go compare with next command from table
+; a command was found
+++      STX $24                         ; save pointer (last command char) 
+        LDY $22                         ; input buffer index pointer (command start in basic line)
+        LDX #$63                        ; new command start token #$63
+        LDA $23                         ; command counter value
+        BPL +                           ; first page commands
+        INX                             ; else inrease new command start token to #$64
+        SBC #$7F                        ; substract #$7F, to start from #01
++       STA CBM_COMMANDBUF+1,Y          ; store command token
+        TXA
+        STA CBM_COMMANDBUF,Y            ; store command start token
+        LDX $24                         ; pointer to last found command char from input buffer  
+-       INY                             ; act possition in basic input line +1
+        INX                             ; point to next input possition (after last found command)
+        LDA CBM_COMMANDBUF,X            ; move rest of line
+        STA CBM_COMMANDBUF+1,Y          ; to possition after double token
+        BNE -                           ; loop until end of line
+        LDX $22                         ; 
+        INX                             ; increas search start possition
+        BNE --                          ; branch if it is not the last char in the input buffer
++++     JSR ROM_ON                      ; else switch on ROM
+        JMP $A57C                       ; go to ROM
+
+; foolowing are some support routines, used in different commands
 ---------------------------------
 ; switch on ROM
 ROM_ON   
@@ -1011,6 +1035,8 @@ L85E2   PHA
 L85ED   JSR ROM_ON
 L85F0   JSR $A3BF
 L85F3   JMP ROM_OFF
+---------------------------------
+
 ; ----------------------------------------------
 ; - $85F6 CHRLO --------------------------------
 ; ----------------------------------------------
@@ -1033,6 +1059,8 @@ P_SPC   LDA #$20
         !by $2c
 P_RET   LDA #$0D
         JMP CBM_CHROUT
+
+; additional some support routines
 ---------------------------------
 L8607   JSR ROM_ON
         JSR CBM_CHRGOT
@@ -1050,12 +1078,12 @@ L861D   JSR ROM_ON
         JSR ROM_OFF
         PLP
 +       RTS
-
+---------------------------------
 ; $8629 Print error , with No. in X
 PRINTERR
         JSR ROM_ON
         JMP ($0300)
-
+---------------------------------
 ; check for a specific value
 L862F   PHA
         JSR ROM_ON
@@ -1097,6 +1125,7 @@ L8675   JSR ROM_ON
 L867E   LDX #$0E                        ; ILLEGAL QUANTITY
         JMP PRINTERR
 ---------------------------------
+; get address, and byte
 L8683   JSR ROM_ON
         JSR CBM_GETNUM
         JSR ROM_OFF
@@ -1142,13 +1171,13 @@ L86BD   JSR L8598                       ; CBM_GETBYT
         BCC -
 --      JMP L867E                       ; ILLEGAL QUANTITY
 ---------------------------------
-; check for input between $01 and $08
-; set bit 0 to 7, and store it to $02
+; checks for input between $01 and $08
+; sets the bits 0 to 7 accordingly, and store it to $02
 L86C7   JSR L8598                       ; CBM_GETBYT
         TXA                             ; transfer byte to accu
         BEQ --                          ; error if 0
         CMP #$09                        ; compare with 9
-        BCS --                          ; error if equal or bigger
+        BCS --                          ; error if equal or higher
         TAY                             ; transfer to Y
         LDA #$01                        ; load accu with 1
 -       ASL                             ; multiply with 2
@@ -1158,12 +1187,13 @@ L86C7   JSR L8598                       ; CBM_GETBYT
         STA $02                         ; store value into $02
         RTS
 ---------------------------------
+; define voice No. according to the input
 L86DC   JSR L8598                       ; CBM_GETBYT
         DEX
-        CPX #$03
-        BCS --
-        LDY L828B,X 
-        LDX #$D4
+        CPX #$03                        ; compare with 3
+        BCS --                          ; error if equal or higher
+        LDY VOICES,X                    ; $00,$07,$0e, voice low byte
+        LDX #$D4                        ; voice high byte
         STY $14
         STX $15
         RTS
@@ -1173,32 +1203,37 @@ L86F1   JSR L8598                       ; CBM_GETBYT
         INX                             ; increase
 -       RTS
 ; ----------------------------------------------
-; - $86f6 Own plop vector ----------------------
+; - $86f6 own plop vector ----------------------
 ; ----------------------------------------------
+; BASIC-Text auflisten / Umwandlung Token in BASIC-Text 
 OWN_PLOP
-        STA $02
-L86F8   BIT $CA1B
-L86FB   BPL L8718                       ; $00 - $7F
-L86FD   CMP #$3A
-L86FF   BNE L870A
-L8701   LDA $0F
-L8703   BMI L870A
-L8705   LDA #$92
-L8707   JSR CBM_CHROUT
-L870A   TYA
+        STA $02                         ; save act. char
+        BIT $CA1B                       ; check for reverse ON/OFF
+        BPL L8718                       ; branch if OFF, bit 7 was clear
+        CMP #$3A                        ; else compare wth ':'
+        BNE +                           ; branch if not
+; Quotation mode switch during tokenization; Bit #6: 0 = Normal mode; 1 = Quotation mode.
+; Quotation mode switch during LIST; $01 = Normal mode; $FE = Quotation mode.
+        LDA $0F                         ; else check quotation mode
+        BMI +                           ; branch on quote mode
+        LDA #$92                        ; else switch reverse off
+        JSR CBM_CHROUT                  ;
++       TYA                             ; index for line to accu
 L870B   CLC
-L870C   ADC $5F
-L870E   CMP $F7
-L8710   BNE L8722
-L8712   LDA #$12
+L870C   ADC $5F                         ; act. line low byte ???
+L870E   CMP $F7                         ; ???
+L8710   BNE L8722                       ; ???
+L8712   LDA #$12                        ; switch reverse on
 L8714   JSR CBM_CHROUT
 L8717   CLV
-L8718   BVC L8722
+
+L8718   BVC L8722                       ; branch if bit 6 at address $CA1A is clear
 L871A   CMP #$3A
 L871C   BNE L8722
-L871E   LDA $0F
-L8720   BPL -
-L8722   LDX $CA1B
+L871E   LDA $0F                         ; check quotation mode
+L8720   BPL -                           ; branch if not set
+
+L8722   LDX $CA1B                       ; 
 L8725   DEX
 L8726   BNE L8744
 L8728   LDA $CA21                       ; PAGE mode
@@ -1587,18 +1622,18 @@ CMD_ERRN
 ; - $8A09 YPOS ---------------------------------
 ; ----------------------------------------------
 CMD_YPOS
-        LDA $D6
+        LDA $D6                         ; load current physical line number of cursor
         !by $24
 L8A0C   TXA
-L8A0D   LDX #$00
-L8A0F   STX $62
-        STA $63
-L8A13   JSR ROM_ON
-        LDA #$00
-        STA $0D
-L8A1A   LDX #$90
-        SEC
-        JMP CBM_FLOATC
+L8A0D   LDX #$00                        ; low byte
+L8A0F   STX $62                         ; store for float
+        STA $63                         ;
+L8A13   JSR ROM_ON                      ; switch ROM on
+        LDA #$00                        
+        STA $0D                         ; Variable type = 0, = numeric
+L8A1A   LDX #$90                        ; load exponent
+        SEC                             ; set carry for positive value
+        JMP CBM_FLOATC                  ; FLOAT UNSIGNED VALUE IN FAC+1,2
 ---------------------------------
 L8A20   JSR ROM_ON
         JMP CMD_PUTNEW
@@ -1717,10 +1752,10 @@ L8AD6   LDA CBM_TXTPTR
         PHA
         LDA #$00
         STA CBM_TXTPTR
-        STA $0200,Y 
+        STA CBM_COMMANDBUF,Y 
         DEY
 -       LDA ($22),Y
-        STA $0200,Y 
+        STA CBM_COMMANDBUF,Y 
         DEY
         BPL -
         JSR L84E0
@@ -2862,18 +2897,18 @@ L930B   JSR INCFB_FC
         LDX #$FF
 L9318   TYA
         INX
-        STA $0200,X 
+        STA CBM_COMMANDBUF,X 
         INX
-        STA $0200,X 
+        STA CBM_COMMANDBUF,X 
         JSR L857A
         INX
-        STA $0200,X 
+        STA CBM_COMMANDBUF,X 
         JSR L857A
         BNE +
-        DEC $0200,X 
+        DEC CBM_COMMANDBUF,X 
 +       INX
-        STA $0200,X 
-        DEC $0200,X 
+        STA CBM_COMMANDBUF,X 
+        DEC CBM_COMMANDBUF,X 
         DEC $02
         BNE L9318
         STX $02
@@ -2885,12 +2920,12 @@ L9341   LDA #$28
         LDX $02
 L9348   DEX
         DEX
-        LDA $0200,X 
+        LDA CBM_COMMANDBUF,X 
         STA $63
         DEX
         TXA
         PHA
-        LDA $0200,X 
+        LDA CBM_COMMANDBUF,X 
         STA $62
         JSR $BDD1
         PLA
@@ -2910,20 +2945,20 @@ L9348   DEX
 L9375   LDX $02
 L9377   DEX
         DEX
-        LDA $0202,X 
-        CMP $0200,X 
+        LDA CBM_COMMANDBUF+2,X 
+        CMP CBM_COMMANDBUF,X 
         BNE +
-        LDA $0201,X 
-        CMP $01FF,X 
+        LDA CBM_COMMANDBUF+1,X 
+        CMP CBM_COMMANDBUF-1,X 
         BEQ ++
-+       INC $0200,X 
++       INC CBM_COMMANDBUF,X 
         BNE +
-        INC $01FF,X 
+        INC CBM_COMMANDBUF-1,X 
 +       RTS
 ---------------------------------
 ++      LDA #$00
-        STA $01FF,X 
-        STA $0200,X 
+        STA CBM_COMMANDBUF-1,X 
+        STA CBM_COMMANDBUF,X 
         DEX
         DEX
         BPL L9377
@@ -4668,6 +4703,7 @@ LA002   !pet "ypoS"
         !pet $5f,"V"
         !pet $5f,"R"
         !pet $5f,"M"
+;page 2 commands
         !pet "typE"
         !pet "textcopY"
         !pet "graphcopY"
@@ -6325,7 +6361,7 @@ LAE19   TAX
         CMP ($FB),Y
         BNE -
         LDY $FE
-        STA $0200,Y 
+        STA CBM_COMMANDBUF,Y 
         LDA #$9D
         JSR CBM_CHROUT
         TXA
@@ -6339,7 +6375,7 @@ LAE19   TAX
         TAY
         BEQ +
         DEY
--       LDA $0200,Y 
+-       LDA CBM_COMMANDBUF,Y 
         STA ($62),Y
         DEY
         BPL -
@@ -6903,7 +6939,7 @@ CMD_VOL
 ; - $B22B ENVELOPE -----------------------------
 ; ----------------------------------------------
 CMD_ENVELOPE
-        JSR L86DC
+        JSR L86DC                       ; input voice register 0-2 high and low byte into $14/$15
         LDY #$05
 -       STY $FB
         JSR L86BA                       ; CBM_CHKCOM, get byte, and check for $00 - $0f
@@ -6926,7 +6962,7 @@ CMD_ENVELOPE
 ; - $B24B WAVE ---------------------------------
 ; ----------------------------------------------
 CMD_WAVE
-        JSR L86DC
+        JSR L86DC                       ; input voice register 0-2 high and low byte into $14/$15
         JSR L858F                       ; CBM_COMBYT
         LDY #$04
         TXA
@@ -6978,7 +7014,7 @@ LB2A1   RTS
 ; - $B2A2 SOUND --------------------------------
 ; ----------------------------------------------
 CMD_SOUND
-        JSR L86DC
+        JSR L86DC                       ; input voice register 0-2 high and low byte into $14/$15
         STY $02
         JSR L85A1                       ; CBM_CHKCOM
         JSR L85D3                       ; CBM_FRMNUM,CBM_GETADR
@@ -7020,7 +7056,7 @@ CMD_CLRSID
 ; - $B2EF PULSE --------------------------------
 ; ----------------------------------------------
 CMD_PULSE
-        JSR L86DC
+        JSR L86DC                       ; input voice register 0-2 high and low byte into $14/$15
         STY $02
         JSR L85A1                       ; CBM_CHKCOM
         JSR L85D3                       ; CBM_FRMNUM,CBM_GETADR
@@ -7971,7 +8007,7 @@ LB924   STA ($14),Y
         STA ($14),Y
 LB93C   JMP L8691                       ; switch on kernel
 ---------------------------------
-LB93F   CMP #$C8
+LB93F   CMP #$C8                        ; 
         BCS LB981
         TAX
         LDA $14
@@ -8485,22 +8521,22 @@ LBCD7   INX
 ; - $BCD9 TEST ---------------------------------
 ; ----------------------------------------------
 CMD_TEST
-        LDA $14
-        PHA
-        LDA $15
-        PHA
-        JSR L8683                       ; CBM_GETNUM
-        TXA
+        LDA $14                         ;
+        PHA                             ; save $14/$15
+        LDA $15                         ;
+        PHA                             ;
+        JSR L8683                       ; CBM_GETNUM, get address and byte
+        TXA                             ; get byte into accu
         JSR LB93F
         LDX #$00
         BCS +
         AND ($14),Y
         BEQ +
         INX
-+       PLA
-        STA $15
-        PLA
-        STA $14
++       PLA                             ;
+        STA $15                         ; restore $14/$15
+        PLA                             ;
+        STA $14                         ;
         JSR L8691                       ; switch on kernel
         JMP L8A0C
 ; ----------------------------------------------
