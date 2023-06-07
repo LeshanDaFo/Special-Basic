@@ -21,9 +21,9 @@ The two differnt version are allmost the same, only the startup message is diffe
   <th>SPECIAL BASIC 1993</th>
  </tr><tr>
 
-  <td align="center"><img src="https://github.com/LeshanDaFo/C64-Programmers-Tools-back/assets/97148663/ddcf31c5-a8c4-4c61-8277-df13a0112f1c" width="320" height="240" alt="1993"></td>
+  <td align="center"><img src="https://github.com/LeshanDaFo/Special-Basic/assets/97148663/ab1d1069-4f4c-4efb-812a-23c79d07a97a" width="320" height="240" alt="1987"></td>
    <th></th>
-   <td align="center"><img src="https://github.com/LeshanDaFo/C64-Programmers-Tools-back/assets/97148663/d0cb8d05-9bd9-438a-aeb8-7dbb89b83013" width="320" height="240" alt="1987"></td>
+   <td align="center"><img src="https://github.com/LeshanDaFo/Special-Basic/assets/97148663/2967f925-19ae-4457-8996-6d0a24ceac25" width="320" height="240" alt="1993"></td>
  </tr>
 </table>
 </div>
