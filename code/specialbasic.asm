@@ -11,7 +11,6 @@
 ; #  This source code is bsed on the existing Disk images       #
 ; #  published by Markt & Technik in 1987, 64'er Extra Nr 7     #
 ; #  and 1993, in 64'er Sonderheft 87                           #
-; #  the German computer magazine "64'er 88/04"                 #
 ; #                                                             #
 ; #  Special Basic was written by Michael Störch & Lars George  #
 ; #                                                             #
