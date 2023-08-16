@@ -62,10 +62,10 @@ CBM_WARMSTART   = $A474                 ; basic warm start
 CBM_LNKPRG      = $A533	                ; rechain basic program lines
 CBM_INLIN       = $A560                 ; call for BASIC input and return
 CBM_FNDLIN      = $A613                 ; find line in basic
-CBM_CLR         = $A660                 ; basic command CLR
+CBM_CLEARC      = $A660                 ; basic command CLR
 CBM_STXTPT      = $A68E                 ; set txtptr to beginning of program-1
 CBM_NEWSTT      = $A7AE                 ; process next statement
-CBM_BSTOP       = $A82C                 ; basic call check STP
+CBM_ISCNTC      = $A82C                 ; basic call check STP
 CBM_GOTO        = $A8A0                 ; perform GOTO
 CBM_DATA        = $A8F8                 ; perform DATA
 CBM_ADCGTPT     = $A8FB                 ; add (y) to CHRGET pointer
@@ -80,7 +80,7 @@ CBM_CHKCHAR     = $AEFF                 ; check for a specific value
 CBM_SNERR       = $AF08                 ; handle syntax error
 CBM_PTRGET      = $B08B                 ; GET PNTR TO VARIABLE INTO "VARPNT".
 CBM_ERRFC       = $B248                 ; illegal quantity error
-CBM_INTFAC      = $B391                 ; convert fixed integer AY to float FAC1
+CBM_GIVAYF      = $B391                 ; convert fixed integer AY to float FAC1
 CBM_CHKDIR      = $B3A6                 ; check direct mode
 CBM_STRSPA      = $B47D                 ; make string space A bytes long
 CMD_PUTNEW      = $B4CA
@@ -1095,7 +1095,7 @@ L863A   JSR ROM_ON
         JMP ROM_OFF
 ---------------------------------
 L8643   JSR ROM_ON
-        JSR CBM_BSTOP
+        JSR CBM_ISCNTC
         JMP ROM_OFF
 ---------------------------------
 L864C   JSR ROM_ON
@@ -1244,7 +1244,7 @@ L8733   BCS L8744
 L8735   JSR $F13E
 L8738   TAX
 L8739   BEQ L8735
-L873B   JSR CBM_BSTOP
+L873B   JSR CBM_ISCNTC
 L873E   JSR CMD_CLS
 L8741   JMP $A6C9
 ---------------------------------
@@ -1882,7 +1882,7 @@ L8BB9   JSR ROM_ON
         LDA $23
         ADC #$00
         STA CBM_VARTAB+1
-        JMP CBM_CLR
+        JMP CBM_CLEARC
 ; ----------------------------------------------
 ; - $8BCF MONITOR ------------------------------
 ; ----------------------------------------------
@@ -2132,7 +2132,7 @@ L8D66   JSR L858F                       ; CBM_COMBYT
         STA $24
         STA $25
 L8D73   JSR ROM_ON
-         SEC
+        SEC
         LDA #$1C
         SBC $AC
         STA $63
@@ -2259,7 +2259,7 @@ CMD_PAUSE
         BEQ +
 --      LDA $A2
         STA $02
--       JSR CBM_BSTOP
+-       JSR CBM_ISCNTC
         LDA $A2
         SEC
         SBC $02
@@ -2885,7 +2885,7 @@ L92D9   STA $FB
         JMP L92D9
 ---------------------------------
 L9302   JSR ROM_ON
-        JSR CBM_CLR
+        JSR CBM_CLEARC
         JMP CBM_READY
 ---------------------------------
 ; part of MATRX?
@@ -3071,7 +3071,7 @@ L9411   LDA $FB
         JSR L9375
         JMP -
 ---------------------------------
-L947C   JSR CBM_BSTOP
+L947C   JSR CBM_ISCNTC
         JSR P_RET
 -       LDX $028D
         DEX
@@ -4053,7 +4053,7 @@ L9BA6   JSR L9C05
         LDA $033D
         STA $C4
 ++      JSR $F750
-        JSR CBM_BSTOP
+        JSR CBM_ISCNTC
         LDY $B7
         BEQ +
 -       DEY
@@ -4456,7 +4456,7 @@ CMD_HIMEM
         INC CBM_TXTTAB+1
         JMP $A646
 ---------------------------------
-L9F2A   JMP CBM_CLR
+L9F2A   JMP CBM_CLEARC
 ; ----------------------------------------------
 ; - $9F2D Go 64 --------------------------------
 ; ----------------------------------------------
